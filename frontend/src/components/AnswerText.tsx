@@ -12,7 +12,17 @@ function Segments({ segments, onCite }: { segments: Segment[]; onCite: (n: numbe
   return (
     <>
       {segments.map((s, i) =>
-        s.kind === "text" ? <span key={i}>{s.text}</span> : <CitationChip key={i} n={s.n} onClick={() => onCite(s.n)} />,
+        s.kind === "text" ? (
+          <span key={i}>{s.text}</span>
+        ) : (
+          <span key={i} className="whitespace-nowrap">
+            {s.lead}
+            {s.ns.map((n, j) => (
+              <CitationChip key={j} n={n} onClick={() => onCite(n)} />
+            ))}
+            {s.trail}
+          </span>
+        ),
       )}
     </>
   );

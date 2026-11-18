@@ -6,7 +6,7 @@ export function CitationChip({ n, onClick, muted }: { n: number; onClick?: () =>
   }`;
   if (!onClick) return <span className={cls}>{n}</span>;
   return (
-    <button type="button" onClick={onClick} className={`${cls} mx-0.5 hover:bg-indigo-200`} aria-label={`Show source ${n}`}>
+    <button type="button" onClick={onClick} className={`${cls} ml-px hover:bg-indigo-200`} aria-label={`Show source ${n}`}>
       {n}
     </button>
   );

@@ -35,9 +35,9 @@ bash (macOS/Linux; on Git Bash for Windows use `source .venv/Scripts/activate`):
 cd backend
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt
 cp .env.example .env        # then set GEMINI_API_KEY in .env (free at https://aistudio.google.com)
-uvicorn app.main:create_app --factory --reload --port 8000
+python -m uvicorn app.main:create_app --factory --reload --port 8000
 ```
 
 PowerShell (Windows):
@@ -46,12 +46,14 @@ PowerShell (Windows):
 cd backend
 python -m venv .venv
 .venv\Scripts\Activate.ps1   # if blocked: Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt
 Copy-Item .env.example .env  # then set GEMINI_API_KEY in .env (free at https://aistudio.google.com)
-uvicorn app.main:create_app --factory --reload --port 8000
+python -m uvicorn app.main:create_app --factory --reload --port 8000
 ```
 
-**No key?** Set `PROVIDER=fake` in `.env`. It uses deterministic bag-of-words embeddings and an echo "LLM", so the whole flow runs offline. Its answers just repeat the best-matching passage.
+Commands use `python -m …` so they run the venv's tools even where the `pip`/`uvicorn` launchers aren't on `PATH` or can't be executed.
+
+**No key?** In `.env`, set `PROVIDER=fake` and `MIN_SCORE=0.2`. The fake provider uses deterministic bag-of-words embeddings and an echo "LLM", so the whole flow runs offline; its word-overlap scores run lower than real embeddings (0.2–0.65 for related text), so the default `MIN_SCORE` of 0.6 would report "not found" for most questions. Its answers just repeat the best-matching passage.
 
 ### 2. Frontend (port 5173)
 
@@ -66,8 +68,8 @@ Open http://localhost:5173. Vite proxies `/api/*` to the backend on port 8000, s
 ### Tests
 
 ```bash
-cd backend && pytest          # offline: fake provider + mocked HTTP, no API key needed
-cd frontend && npm run build  # typecheck + production build
+cd backend && python -m pytest   # offline: fake provider + mocked HTTP, no API key needed
+cd frontend && npm run build     # typecheck + production build
 ```
 
 ## How it was verified

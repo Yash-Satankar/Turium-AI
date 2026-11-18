@@ -64,6 +64,8 @@ export function errorMessage(err: unknown): string {
     switch (err.code) {
       case "PROVIDER_RATE_LIMITED":
         return "The AI provider is rate-limiting requests. Wait a moment and try again.";
+      case "PROVIDER_UNAVAILABLE":
+        return "The AI model is busy right now. Give it a few seconds and try again.";
       case "PROVIDER_TIMEOUT":
         return "The AI provider took too long to respond. Try again.";
       default:

@@ -90,7 +90,8 @@ All errors share one shape:
 | 404 | `NOT_FOUND` | Unknown route |
 | 405 | `METHOD_NOT_ALLOWED` | Wrong method |
 | 502 | `PROVIDER_ERROR` | Embedding/LLM provider returned an error |
-| 503 | `PROVIDER_RATE_LIMITED` | Provider returned 429 |
+| 503 | `PROVIDER_RATE_LIMITED` | Provider returned 429 (after retries) |
+| 503 | `PROVIDER_UNAVAILABLE` | Provider returned 503, model overloaded (after retries) |
 | 504 | `PROVIDER_TIMEOUT` | Provider call timed out |
 | 500 | `INTERNAL_ERROR` | Anything unexpected (details logged, not leaked) |
 

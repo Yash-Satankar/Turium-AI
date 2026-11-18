@@ -34,7 +34,7 @@ Open http://localhost:5173. Vite proxies `/api/*` to the backend, so no CORS set
 ### Tests
 
 ```bash
-cd backend && pytest          # 96 tests, offline (fake provider + mocked HTTP)
+cd backend && pytest          # 110 tests, offline (fake provider + mocked HTTP)
 cd frontend && npm run build  # typecheck + production build
 ```
 
@@ -47,7 +47,9 @@ All settings are environment variables (or `backend/.env`):
 | `PROVIDER` | `gemini` | `gemini` or `fake` |
 | `GEMINI_API_KEY` | none | Required for `gemini` |
 | `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | |
-| `GEMINI_CHAT_MODEL` | `gemini-2.5-flash` | |
+| `GEMINI_CHAT_MODEL` | `gemini-3.8-flash` | |
+| `GEMINI_CHAT_FALLBACK_MODEL` | empty (disabled) | Chat model tried once when the primary returns 429/503 after retries, e.g. a Flash-Lite model on the free tier. Never used for embeddings |
+| `EMBED_BATCH_SIZE` | `20` | Texts per embedding request (1–100). Smaller batches are gentler on free-tier limits |
 | `EMBEDDING_DIM` | `768` | Passed as `outputDimensionality` |
 | `MIN_SCORE` | `0.6` | Chunks scoring below this are dropped before prompting and never cited; if none remain, `/query` answers "not found" without calling the LLM. Tune per model: watch `best_score` in the `query answered` log line |
 | `DATABASE_PATH` | `data/inbox.db` | |
@@ -82,6 +84,7 @@ Things the design doc left open, and how they were decided:
 - **Embedding model ID includes the dimension** (`gemini:gemini-embedding-001:768`), so changing `EMBEDDING_DIM` also isolates old vectors instead of mixing vector spaces.
 - **Redirects are followed manually** and every hop is re-checked (scheme, IP literal, DNS resolution), so a public URL can't redirect to `169.254.169.254` (but see the DNS-rebinding limitation below).
 - **Sources are filtered by `MIN_SCORE`**, not just gated by the best score: weak matches never reach the prompt or the cited sources.
+- **Gemini 429/503 are retried** using the server's `retryDelay` (else `Retry-After`, else 2 s/4 s/8 s backoff). Background calls (document embedding) get 3 retries with waits capped at 30 s; calls a user waits on (query embedding, answer generation) get 1 retry capped at 5 s. If `GEMINI_CHAT_FALLBACK_MODEL` is set, a rate-limited or overloaded answer call is tried once on that model; embeddings never fall back, since another model would put vectors in a different space.
 - **Prompt injection.** Passages are wrapped in `<passage>` tags with their text escaped, and the system prompt says passage content is data. This reduces the risk but does not remove it.
 - **Background jobs are claimed** with a conditional `UPDATE … WHERE status='pending'`, so a job never runs twice for the same item. The job never raises: every failure ends in `failed` with a readable error, or is logged if storage itself is down.
 - **Chunks and the `ready` flip happen in one transaction**, so an item is either fully searchable or not at all.
@@ -96,3 +99,4 @@ Things the design doc left open, and how they were decided:
 - **Status updates use polling, not push.** The UI polls `GET /items` every 2 s while any item is `pending` or `processing`.
 - **DNS-rebinding gap in the SSRF guard.** Resolved IPs are checked, but httpx resolves the host again when it connects, so a hostile DNS server could answer differently the second time. Production should pin the connection to the vetted IP (custom transport) or route fetches through an egress proxy.
 - **Single process, in-process jobs.** Ingestion runs as FastAPI background tasks in the API process. Jobs in flight when the process crashes or restarts are lost; on the next startup those items are marked `failed` ("Interrupted by server restart") and must be re-added. There are no retries.
+- **Failed items can't be retried in place**; re-ingest the URL.

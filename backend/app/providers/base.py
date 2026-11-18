@@ -13,6 +13,13 @@ class ProviderRateLimited(ProviderError):
     code = "PROVIDER_RATE_LIMITED"
 
 
+class ProviderUnavailable(ProviderError):
+    """The provider returned 503 (model overloaded)."""
+
+    status_code = 503
+    code = "PROVIDER_UNAVAILABLE"
+
+
 class ProviderTimeout(ProviderError):
     status_code = 504
     code = "PROVIDER_TIMEOUT"

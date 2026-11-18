@@ -18,7 +18,10 @@ class Settings(BaseSettings):
     provider: Literal["gemini", "fake"] = "gemini"
     gemini_api_key: str | None = None
     gemini_embedding_model: str = "gemini-embedding-001"
-    gemini_chat_model: str = "gemini-2.5-flash"
+    gemini_chat_model: str = "gemini-3.8-flash"
+    # Tried once when the chat model is rate-limited/overloaded. Empty = disabled.
+    gemini_chat_fallback_model: str = ""
+    embed_batch_size: int = Field(default=20, ge=1, le=100)
     embedding_dim: int = Field(default=768, ge=8, le=3072)
     provider_timeout_s: float = Field(default=30.0, gt=0)
 

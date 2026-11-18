@@ -5,6 +5,7 @@ from app.providers.base import (
     ProviderError,
     ProviderRateLimited,
     ProviderTimeout,
+    ProviderUnavailable,
 )
 
 __all__ = [
@@ -13,6 +14,7 @@ __all__ = [
     "ProviderError",
     "ProviderRateLimited",
     "ProviderTimeout",
+    "ProviderUnavailable",
     "build_providers",
 ]
 
@@ -28,7 +30,9 @@ def build_providers(settings: Settings) -> tuple[EmbeddingProvider, LLMProvider,
 
     client = _GeminiClient(settings.gemini_api_key or "", settings.provider_timeout_s)
     return (
-        GeminiEmbeddings(client, settings.gemini_embedding_model, settings.embedding_dim),
-        GeminiLLM(client, settings.gemini_chat_model),
+        GeminiEmbeddings(
+            client, settings.gemini_embedding_model, settings.embedding_dim, batch_size=settings.embed_batch_size
+        ),
+        GeminiLLM(client, settings.gemini_chat_model, fallback_model=settings.gemini_chat_fallback_model),
         client,
     )

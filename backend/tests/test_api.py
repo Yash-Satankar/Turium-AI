@@ -289,3 +289,46 @@ def test_all_chunks_below_threshold_skips_llm(make_client, settings):
     body = client.post("/query", json={"question": "question?"}).json()
     assert body == {"answer": NOT_FOUND_ANSWER, "found": False, "sources": []}
     assert llm.calls == []
+
+
+def _gemini_llm(handler, fallback=None):
+    from app.providers.gemini import GeminiLLM, _GeminiClient
+
+    client = _GeminiClient("test-key", 5, transport=httpx.MockTransport(handler), sleep=lambda s: None)
+    return GeminiLLM(client, "primary-model", fallback_model=fallback)
+
+
+def _overloaded_unless_fallback(request: httpx.Request) -> httpx.Response:
+    if "fallback-model" in request.url.path:
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "From fallback [1]"}]}}]})
+    return httpx.Response(503, json={"error": {"code": 503, "message": "overloaded", "status": "UNAVAILABLE"}})
+
+
+def test_query_uses_fallback_model_when_primary_overloaded(make_client):
+    client = make_client(llm=_gemini_llm(_overloaded_unless_fallback, fallback="fallback-model"))
+    ingest_note(client, "The office wifi password is maple-syrup-42.")
+    resp = client.post("/query", json={"question": "office wifi password"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["answer"] == "From fallback [1]"
+    assert resp.json()["found"] is True
+
+
+def test_query_overloaded_without_fallback_is_503(make_client):
+    client = make_client(llm=_gemini_llm(_overloaded_unless_fallback))
+    ingest_note(client, "The office wifi password is maple-syrup-42.")
+    body = assert_error(client.post("/query", json={"question": "office wifi password"}), 503, "PROVIDER_UNAVAILABLE")
+    assert body["message"] == "The AI model is overloaded right now; try again in a moment"
+
+
+def test_embedding_unavailable_marks_item_failed(make_client):
+    from app.providers import ProviderUnavailable
+
+    class Overloaded(FakeEmbeddings):
+        def embed_documents(self, texts):
+            raise ProviderUnavailable("The AI model is overloaded right now; try again in a moment")
+
+    client = make_client(embedder=Overloaded())
+    ingest_note(client, "some note")
+    item = client.get("/items").json()["items"][0]
+    assert item["status"] == "failed"
+    assert item["error"] == "Embedding failed: The AI model is overloaded right now; try again in a moment"

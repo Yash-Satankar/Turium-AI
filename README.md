@@ -34,7 +34,7 @@ Open http://localhost:5173. Vite proxies `/api/*` to the backend, so no CORS set
 ### Tests
 
 ```bash
-cd backend && pytest          # 81 tests, offline (fake provider + mocked HTTP)
+cd backend && pytest          # 96 tests, offline (fake provider + mocked HTTP)
 cd frontend && npm run build  # typecheck + production build
 ```
 
@@ -49,7 +49,7 @@ All settings are environment variables (or `backend/.env`):
 | `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | |
 | `GEMINI_CHAT_MODEL` | `gemini-2.5-flash` | |
 | `EMBEDDING_DIM` | `768` | Passed as `outputDimensionality` |
-| `MIN_SCORE` | `0.6` | Below this, `/query` answers "not found" without calling the LLM. Tune per model: watch `best_score` in the `query answered` log line |
+| `MIN_SCORE` | `0.6` | Chunks scoring below this are dropped before prompting and never cited; if none remain, `/query` answers "not found" without calling the LLM. Tune per model: watch `best_score` in the `query answered` log line |
 | `DATABASE_PATH` | `data/inbox.db` | |
 | `FETCH_TIMEOUT_S` / `FETCH_MAX_BYTES` / `FETCH_MAX_REDIRECTS` | `10` / `2000000` / `5` | |
 | `FETCH_USER_AGENT` | `KnowledgeInbox/0.1 (python-httpx)` | Wikipedia and some other sites return 403 unless the UA includes a contact URL or email, e.g. `MyInbox/1.0 (+https://you.example)` |
@@ -63,11 +63,12 @@ All settings are environment variables (or `backend/.env`):
 backend/app/
   main.py            app factory: lifespan (schema, restart recovery), request-ID middleware, error envelope
   config.py          settings
-  api/               routes (thin) + Pydantic schemas (discriminated ingest union)
-  services/          ingestion (background job), fetcher, url_safety, extractor, chunker, retrieval, rag
+  text_utils.py      truncate() for titles, previews, snippets
+  api/               routes (call services only, never db) + Pydantic schemas (discriminated ingest union)
+  services/          ingestion (background job), items, fetcher, url_safety, extractor, chunker, retrieval, rag
   providers/         EmbeddingProvider / LLMProvider protocols, gemini (REST via httpx), fake
   db/                connection + schema, repositories (raw SQL)
-backend/tests/       API, fetcher/SSRF, chunker, Gemini client (mocked transport)
+backend/tests/       API, ingestion job, fetcher/SSRF, chunker, text_utils, Gemini client (mocked transport)
 frontend/src/
   api/               typed client + ApiError
   hooks/             useItems (polling while pending/processing), useAsk
@@ -79,10 +80,19 @@ frontend/src/
 Things the design doc left open, and how they were decided:
 
 - **Embedding model ID includes the dimension** (`gemini:gemini-embedding-001:768`), so changing `EMBEDDING_DIM` also isolates old vectors instead of mixing vector spaces.
-- **Redirects are followed manually** and every hop is re-checked (scheme, IP literal, DNS resolution), so a public URL can't redirect to `169.254.169.254`.
-- **Known gap: DNS rebinding.** The resolved IPs are checked, but httpx resolves the host again when it connects. Production should pin the connection to the vetted IP (custom transport) or send fetches through an egress proxy.
+- **Redirects are followed manually** and every hop is re-checked (scheme, IP literal, DNS resolution), so a public URL can't redirect to `169.254.169.254` (but see the DNS-rebinding limitation below).
+- **Sources are filtered by `MIN_SCORE`**, not just gated by the best score: weak matches never reach the prompt or the cited sources.
 - **Prompt injection.** Passages are wrapped in `<passage>` tags with their text escaped, and the system prompt says passage content is data. This reduces the risk but does not remove it.
-- **Background jobs are claimed** with a conditional `UPDATE … WHERE status='pending'`, so a job never runs twice for the same item.
+- **Background jobs are claimed** with a conditional `UPDATE … WHERE status='pending'`, so a job never runs twice for the same item. The job never raises: every failure ends in `failed` with a readable error, or is logged if storage itself is down.
 - **Chunks and the `ready` flip happen in one transaction**, so an item is either fully searchable or not at all.
 - **One SQLite connection per unit of work.** Handlers and background tasks run on different threads, and pooled connections can't be shared across threads.
+- **Routes only call services**; database access lives in `services/` and `db/`.
 - **Sync route handlers**: FastAPI runs them in its threadpool, so blocking SQLite and provider calls don't stall the event loop.
+
+## Known limitations
+
+- **`found: true` can still come with a "not found" answer.** `found` means at least one chunk cleared `MIN_SCORE`; the LLM may still decide those chunks don't answer the question and say so. The UI shows the answer text as returned.
+- **No delete or edit.** Items can only be added. A wrong or duplicate item stays searchable.
+- **Status updates use polling, not push.** The UI polls `GET /items` every 2 s while any item is `pending` or `processing`.
+- **DNS-rebinding gap in the SSRF guard.** Resolved IPs are checked, but httpx resolves the host again when it connects, so a hostile DNS server could answer differently the second time. Production should pin the connection to the vetted IP (custom transport) or route fetches through an egress proxy.
+- **Single process, in-process jobs.** Ingestion runs as FastAPI background tasks in the API process. Jobs in flight when the process crashes or restarts are lost; on the next startup those items are marked `failed` ("Interrupted by server restart") and must be re-added. There are no retries.

@@ -7,6 +7,10 @@ class ProviderError(AppError):
     status_code = 502
     code = "PROVIDER_ERROR"
 
+    def __init__(self, message: str, *, upstream_status: int | None = None):
+        super().__init__(message)
+        self.upstream_status = upstream_status  # HTTP status the provider returned, if any
+
 
 class ProviderRateLimited(ProviderError):
     status_code = 503

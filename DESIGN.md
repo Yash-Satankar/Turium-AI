@@ -73,8 +73,13 @@ chunks(
 ## Retrieval + answer
 
 - Embed the question (query task type), load vectors for `ready` items with the current `embedding_model`, cosine similarity, take `top_k` (default 5, max 10).
-- If the best score < `MIN_SCORE` (configurable), return `found: false` with a fixed "not found in your saved content" answer and **skip the LLM**.
-- Otherwise build a prompt with chunks labelled `[1]…[k]`, instruct the model to answer only from them, cite as `[n]`, and say so if the context doesn't contain the answer. Return the answer plus `sources` in the same order.
+- Drop chunks scoring below `MIN_SCORE` (configurable). If none remain, return `found: false` with a fixed "not found in your saved content" answer and **skip the LLM**.
+- Otherwise build a prompt with the remaining chunks labelled `[1]…[k]`, instruct the model to answer only from them in plain text (`- ` for lists), cite as `[n]`, and say so if the context doesn't contain the answer. Return the answer plus `sources` in the same order.
+
+**Provider resilience (Gemini):**
+- 429/503 are retried using the server's `retryDelay` (else `Retry-After`, else exponential backoff). Background document embedding: 3 retries, waits ≤ 30 s. User-facing calls (question embedding, generation): 1 retry, waits ≤ 5 s.
+- Timeouts per request: embeddings `PROVIDER_TIMEOUT_S` (30 s; question embedding capped at 10 s), generation `GEMINI_GENERATE_TIMEOUT_S` (20 s).
+- Optional `GEMINI_CHAT_FALLBACK_MODEL`: when generation is rate-limited, overloaded or times out, try the fallback once. Primary and fallback share a deadline of generate timeout + 15 s, so worst-case `/query` ≈ 15 s + 35 s = 50 s. Embeddings never fall back (vector spaces would mix).
 
 ## API
 
@@ -92,7 +97,7 @@ All errors share one shape:
 | 502 | `PROVIDER_ERROR` | Embedding/LLM provider returned an error |
 | 503 | `PROVIDER_RATE_LIMITED` | Provider returned 429 (after retries) |
 | 503 | `PROVIDER_UNAVAILABLE` | Provider returned 503, model overloaded (after retries) |
-| 504 | `PROVIDER_TIMEOUT` | Provider call timed out |
+| 504 | `PROVIDER_TIMEOUT` | Provider call timed out (after fallback, if configured) |
 | 500 | `INTERNAL_ERROR` | Anything unexpected (details logged, not leaked) |
 
 `POST /ingest`

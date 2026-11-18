@@ -23,7 +23,8 @@ class Settings(BaseSettings):
     gemini_chat_fallback_model: str = ""
     embed_batch_size: int = Field(default=20, ge=1, le=100)
     embedding_dim: int = Field(default=768, ge=8, le=3072)
-    provider_timeout_s: float = Field(default=30.0, gt=0)
+    provider_timeout_s: float = Field(default=30.0, gt=0)  # embedding calls
+    gemini_generate_timeout_s: float = Field(default=20.0, gt=0)  # answer generation (user is waiting)
 
     # Retrieval
     min_score: float = Field(default=0.6, ge=-1, le=1)

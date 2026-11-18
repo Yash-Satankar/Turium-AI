@@ -34,7 +34,7 @@ Open http://localhost:5173. Vite proxies `/api/*` to the backend, so no CORS set
 ### Tests
 
 ```bash
-cd backend && pytest          # 110 tests, offline (fake provider + mocked HTTP)
+cd backend && pytest          # 119 tests, offline (fake provider + mocked HTTP)
 cd frontend && npm run build  # typecheck + production build
 ```
 
@@ -48,8 +48,10 @@ All settings are environment variables (or `backend/.env`):
 | `GEMINI_API_KEY` | none | Required for `gemini` |
 | `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-001` | |
 | `GEMINI_CHAT_MODEL` | `gemini-3.8-flash` | |
-| `GEMINI_CHAT_FALLBACK_MODEL` | empty (disabled) | Chat model tried once when the primary returns 429/503 after retries, e.g. a Flash-Lite model on the free tier. Never used for embeddings |
+| `GEMINI_CHAT_FALLBACK_MODEL` | empty (disabled) | Chat model tried once when the primary returns 429/503 after retries or times out, e.g. a Flash-Lite model on the free tier. Never used for embeddings |
 | `EMBED_BATCH_SIZE` | `20` | Texts per embedding request (1–100). Smaller batches are gentler on free-tier limits |
+| `PROVIDER_TIMEOUT_S` | `30` | Per-request timeout for embedding calls (the question embedding in `/query` is capped at 10 s) |
+| `GEMINI_GENERATE_TIMEOUT_S` | `20` | Per-request timeout for answer generation. Primary and fallback attempts share a deadline of this + 15 s |
 | `EMBEDDING_DIM` | `768` | Passed as `outputDimensionality` |
 | `MIN_SCORE` | `0.6` | Chunks scoring below this are dropped before prompting and never cited; if none remain, `/query` answers "not found" without calling the LLM. Tune per model: watch `best_score` in the `query answered` log line |
 | `DATABASE_PATH` | `data/inbox.db` | |
@@ -84,7 +86,9 @@ Things the design doc left open, and how they were decided:
 - **Embedding model ID includes the dimension** (`gemini:gemini-embedding-001:768`), so changing `EMBEDDING_DIM` also isolates old vectors instead of mixing vector spaces.
 - **Redirects are followed manually** and every hop is re-checked (scheme, IP literal, DNS resolution), so a public URL can't redirect to `169.254.169.254` (but see the DNS-rebinding limitation below).
 - **Sources are filtered by `MIN_SCORE`**, not just gated by the best score: weak matches never reach the prompt or the cited sources.
-- **Gemini 429/503 are retried** using the server's `retryDelay` (else `Retry-After`, else 2 s/4 s/8 s backoff). Background calls (document embedding) get 3 retries with waits capped at 30 s; calls a user waits on (query embedding, answer generation) get 1 retry capped at 5 s. If `GEMINI_CHAT_FALLBACK_MODEL` is set, a rate-limited or overloaded answer call is tried once on that model; embeddings never fall back, since another model would put vectors in a different space.
+- **Gemini 429/503 are retried** using the server's `retryDelay` (else `Retry-After`, else 2 s/4 s/8 s backoff). Background calls (document embedding) get 3 retries with waits capped at 30 s; calls a user waits on (query embedding, answer generation) get 1 retry capped at 5 s. If `GEMINI_CHAT_FALLBACK_MODEL` is set, a rate-limited, overloaded or timed-out answer call is tried once on that model; embeddings never fall back, since another model would put vectors in a different space. Timeouts are split so the worst-case `/query` stays around 50 s: question embedding ≤ 15 s (10 s timeout + one short retry), then generation (primary + fallback) ≤ `GEMINI_GENERATE_TIMEOUT_S` + 15 s.
+- **`gemini-3*` chat models are sent `thinkingLevel: "low"`** to cut latency, since answers are extractive. If a model rejects the field (400 mentioning thinking), the call is retried once without it and that model is remembered for the process lifetime.
+- **Answers are plain text**: the prompt asks for no Markdown headings, bold or tables, and `- ` list lines.
 - **Prompt injection.** Passages are wrapped in `<passage>` tags with their text escaped, and the system prompt says passage content is data. This reduces the risk but does not remove it.
 - **Background jobs are claimed** with a conditional `UPDATE … WHERE status='pending'`, so a job never runs twice for the same item. The job never raises: every failure ends in `failed` with a readable error, or is logged if storage itself is down.
 - **Chunks and the `ready` flip happen in one transaction**, so an item is either fully searchable or not at all.

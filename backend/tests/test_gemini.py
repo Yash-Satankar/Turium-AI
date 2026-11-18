@@ -225,4 +225,93 @@ def test_retry_and_fallback_are_logged(caplog):
     retry = next(r for r in caplog.records if r.msg == "provider retry")
     assert (retry.op, retry.status, retry.attempt, retry.delay_s) == ("generate", 429, 1, 1.0)
     fb = next(r for r in caplog.records if r.msg == "llm fallback")
-    assert (fb.primary_model, fb.fallback_model) == ("primary-model", "fallback-model")
+    assert (fb.from_model, fb.to_model, fb.reason) == ("primary-model", "fallback-model", "unavailable")
+
+
+# --- timeouts --------------------------------------------------------------------
+
+
+def _timeout(request):
+    raise httpx.ReadTimeout("slow", request=request)
+
+
+def test_fallback_on_primary_timeout(caplog):
+    caplog.set_level("INFO", logger="app.providers.gemini")
+
+    def handler(request):
+        if "primary-model" in request.url.path:
+            return _timeout(request)
+        return httpx.Response(200, json=GENERATE_OK)
+
+    _, llm, _ = make(handler, fallback="fallback-model")
+    assert llm.generate("sys", "prompt") == "Answer [1]"
+    fb = next(r for r in caplog.records if r.msg == "llm fallback")
+    assert fb.reason == "timeout"
+
+
+def test_timeout_without_fallback_raises():
+    _, llm, _ = make(_timeout)
+    with pytest.raises(ProviderTimeout):
+        llm.generate("sys", "prompt")
+
+
+def test_per_request_timeouts():
+    seen: dict[str, float] = {}
+
+    def handler(request):
+        kind = "generate" if "generateContent" in request.url.path else json.loads(request.content)["requests"][0]["taskType"]
+        seen[kind] = request.extensions["timeout"]["read"]
+        return httpx.Response(200, json=GENERATE_OK) if kind == "generate" else embed_ok(request)
+
+    client = _GeminiClient("k", 99, transport=httpx.MockTransport(handler), sleep=lambda s: None)
+    GeminiEmbeddings(client, "m", 8, timeout_s=30).embed_documents(["a"])
+    GeminiEmbeddings(client, "m", 8, timeout_s=30).embed_query("q")
+    GeminiLLM(client, "primary-model", timeout_s=20).generate("sys", "prompt")
+    assert seen == {"RETRIEVAL_DOCUMENT": 30, "RETRIEVAL_QUERY": 10, "generate": 20}
+
+
+# --- thinkingConfig --------------------------------------------------------------
+
+
+def test_thinking_level_sent_only_for_gemini_3_models():
+    script = Script(httpx.Response(200, json=GENERATE_OK))
+    client = _GeminiClient("k", 5, transport=httpx.MockTransport(script), sleep=lambda s: None)
+    GeminiLLM(client, "gemini-3.8-flash").generate("sys", "prompt")
+    GeminiLLM(client, "gemini-2.5-flash-lite").generate("sys", "prompt")
+    assert script.bodies[0]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "low"}
+    assert "thinkingConfig" not in script.bodies[1]["generationConfig"]
+
+
+def test_thinking_config_rejected_then_retried_without_and_remembered():
+    rejected = httpx.Response(400, json={"error": {"code": 400, "message": "Unknown field thinking_level in thinking_config"}})
+    script = Script(rejected, httpx.Response(200, json=GENERATE_OK))
+    client = _GeminiClient("k", 5, transport=httpx.MockTransport(script), sleep=lambda s: None)
+    llm = GeminiLLM(client, "gemini-3.8-flash")
+
+    assert llm.generate("sys", "prompt") == "Answer [1]"
+    assert "thinkingConfig" in script.bodies[0]["generationConfig"]
+    assert "thinkingConfig" not in script.bodies[1]["generationConfig"]
+
+    llm.generate("sys", "prompt")  # remembered: no second rejected attempt
+    assert len(script.bodies) == 3
+    assert "thinkingConfig" not in script.bodies[2]["generationConfig"]
+
+
+def test_unrelated_400_on_gemini_3_is_not_retried():
+    script = Script(httpx.Response(400, json={"error": {"message": "API key not valid"}}))
+    client = _GeminiClient("k", 5, transport=httpx.MockTransport(script), sleep=lambda s: None)
+    with pytest.raises(ProviderError, match="API key"):
+        GeminiLLM(client, "gemini-3.8-flash").generate("sys", "prompt")
+    assert len(script.bodies) == 1
+
+
+def test_deadline_stops_retry_that_cannot_fit(monkeypatch):
+    import app.providers.gemini as gemini
+
+    now = [1000.0]
+    monkeypatch.setattr(gemini.time, "monotonic", lambda: now[0])
+    script = Script(overloaded(), httpx.Response(200, json=GENERATE_OK))
+    client = _GeminiClient("k", 5, transport=httpx.MockTransport(script), sleep=lambda s: None)
+    with pytest.raises(ProviderUnavailable):
+        client.post("/x", {}, "generate", max_retries=1, max_wait_s=5, timeout_s=20, deadline=now[0] + 2.5)
+    assert len(script.bodies) == 1  # a 2s backoff + 1s minimum attempt does not fit in 2.5s

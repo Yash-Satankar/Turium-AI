@@ -332,3 +332,23 @@ def test_embedding_unavailable_marks_item_failed(make_client):
     item = client.get("/items").json()["items"][0]
     assert item["status"] == "failed"
     assert item["error"] == "Embedding failed: The AI model is overloaded right now; try again in a moment"
+
+
+def _timeout_unless_fallback(request: httpx.Request) -> httpx.Response:
+    if "fallback-model" in request.url.path:
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "From fallback [1]"}]}}]})
+    raise httpx.ReadTimeout("slow", request=request)
+
+
+def test_query_falls_back_on_primary_timeout(make_client):
+    client = make_client(llm=_gemini_llm(_timeout_unless_fallback, fallback="fallback-model"))
+    ingest_note(client, "The office wifi password is maple-syrup-42.")
+    resp = client.post("/query", json={"question": "office wifi password"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["answer"] == "From fallback [1]"
+
+
+def test_query_timeout_without_fallback_is_504(make_client):
+    client = make_client(llm=_gemini_llm(_timeout_unless_fallback))
+    ingest_note(client, "The office wifi password is maple-syrup-42.")
+    assert_error(client.post("/query", json={"question": "office wifi password"}), 504, "PROVIDER_TIMEOUT")

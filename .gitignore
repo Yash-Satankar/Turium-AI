@@ -8,3 +8,6 @@ backend/data/
 # Node
 node_modules/
 frontend/dist/
+
+# Local temp/caches (TEMP/TMP/PIP_CACHE_DIR point here)
+.tmp/

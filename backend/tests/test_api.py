@@ -147,11 +147,12 @@ def test_query_found_with_citations(client):
     body = resp.json()
     assert body["found"] is True
     assert "maple-syrup-42" in body["answer"] and "[1]" in body["answer"]
-    assert [s["index"] for s in body["sources"]] == [1, 2]
+    # The unrelated dentist note scores below min_score, so it is not cited.
+    assert [s["index"] for s in body["sources"]] == [1]
     top = body["sources"][0]
     assert top["source_type"] == "note"
     assert "wifi password" in top["snippet"]
-    assert top["score"] >= body["sources"][1]["score"]
+    assert top["score"] >= 0.2
 
 
 def test_query_not_found_skips_llm(make_client):
@@ -238,3 +239,53 @@ def test_startup_fails_interrupted_items(make_client, settings):
     for item_id in ("stuck-1", "stuck-2"):
         assert items[item_id]["status"] == "failed"
         assert items[item_id]["error"] == "Interrupted by server restart"
+
+
+class FixedEmbeddings:
+    """Maps texts to hand-picked vectors so similarity scores are exact."""
+
+    model_id = "fixed:3"
+
+    def __init__(self, vectors: dict[str, list[float]]):
+        self.vectors = vectors
+
+    def _lookup(self, text):
+        return next(v for key, v in self.vectors.items() if key in text)
+
+    def embed_documents(self, texts):
+        return [self._lookup(t) for t in texts]
+
+    def embed_query(self, text):
+        return self._lookup(text)
+
+
+def test_low_scoring_chunk_is_excluded_from_sources(make_client, settings):
+    from app.providers.fake import FakeLLM
+
+    settings.min_score = 0.5
+    llm = FakeLLM()
+    embedder = FixedEmbeddings({"alpha": [1.0, 0.0, 0.0], "beta": [0.3, 0.954, 0.0], "question": [1.0, 0.0, 0.0]})
+    client = make_client(embedder=embedder, llm=llm)
+    ingest_note(client, "alpha note about the topic.")
+    ingest_note(client, "beta note, only loosely related.")
+
+    body = client.post("/query", json={"question": "question?", "top_k": 5}).json()
+    assert body["found"] is True
+    assert [s["title"] for s in body["sources"]] == ["alpha note about the topic."]
+    assert len(llm.calls) == 1
+    assert "beta note" not in llm.calls[0][1]  # never reached the prompt
+
+
+def test_all_chunks_below_threshold_skips_llm(make_client, settings):
+    from app.providers.fake import FakeLLM
+
+    settings.min_score = 0.5
+    llm = FakeLLM()
+    embedder = FixedEmbeddings({"alpha": [0.4, 0.917, 0.0], "beta": [0.3, 0.0, 0.954], "question": [1.0, 0.0, 0.0]})
+    client = make_client(embedder=embedder, llm=llm)
+    ingest_note(client, "alpha note")
+    ingest_note(client, "beta note")
+
+    body = client.post("/query", json={"question": "question?"}).json()
+    assert body == {"answer": NOT_FOUND_ANSWER, "found": False, "sources": []}
+    assert llm.calls == []

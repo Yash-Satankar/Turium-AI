@@ -41,11 +41,15 @@ def answer_question(
 ) -> Answer:
     start = time.perf_counter()
     query_vector = embedder.embed_query(question)
-    chunks = retrieve(settings.database_path, query_vector, embedder.model_id, top_k)
-    best = chunks[0].score if chunks else None
+    candidates = retrieve(settings.database_path, query_vector, embedder.model_id, top_k)
+    best = round(candidates[0].score, 4) if candidates else None
+    # Weak matches are noise: keep them out of the prompt and out of the cited sources.
+    chunks = [c for c in candidates if c.score >= settings.min_score]
 
-    if best is None or best < settings.min_score:
-        logger.info("query answered", extra={"found": False, "best_score": best, "candidates": len(chunks), "llm": False})
+    if not chunks:
+        logger.info(
+            "query answered", extra={"found": False, "best_score": best, "candidates": len(candidates), "llm": False}
+        )
         return Answer(answer=NOT_FOUND_ANSWER, found=False, sources=[])
 
     text = llm.generate(SYSTEM_PROMPT, build_prompt(question, chunks))
@@ -53,7 +57,8 @@ def answer_question(
         "query answered",
         extra={
             "found": True,
-            "best_score": round(best, 4),
+            "best_score": best,
+            "candidates": len(candidates),
             "sources": len(chunks),
             "duration_ms": round((time.perf_counter() - start) * 1000),
         },

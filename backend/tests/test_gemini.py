@@ -277,7 +277,7 @@ def test_thinking_level_sent_only_for_gemini_3_models():
     script = Script(httpx.Response(200, json=GENERATE_OK))
     client = _GeminiClient("k", 5, transport=httpx.MockTransport(script), sleep=lambda s: None)
     GeminiLLM(client, "gemini-3.8-flash").generate("sys", "prompt")
-    GeminiLLM(client, "gemini-2.5-flash-lite").generate("sys", "prompt")
+    GeminiLLM(client, "test-model").generate("sys", "prompt")
     assert script.bodies[0]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "low"}
     assert "thinkingConfig" not in script.bodies[1]["generationConfig"]
 

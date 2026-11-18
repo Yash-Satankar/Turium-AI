@@ -3,11 +3,18 @@ __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
-backend/.env
+
+# Secrets and local data
+.env
+!.env.example
 backend/data/
+*.db
+*.db-wal
+*.db-shm
+
 # Node
 node_modules/
-frontend/dist/
+dist/
 
-# Local temp/caches (TEMP/TMP/PIP_CACHE_DIR point here)
+# Local temp/caches (TEMP/TMP/PIP_CACHE_DIR/npm_config_cache point here)
 .tmp/

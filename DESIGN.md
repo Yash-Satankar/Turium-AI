@@ -30,7 +30,7 @@ React (Vite)  ──HTTP/JSON──►  FastAPI
 1. `POST /ingest` validates input synchronously, inserts the item with `status=pending`, schedules a background task, returns **202** with the item.
 2. The background task sets `processing` → (URL only) fetch + extract text and title → chunk → embed → store chunks → `ready`.
 3. Any failure sets `failed` with a human-readable `error`. Nothing is half-written: chunks are inserted in one transaction.
-4. On startup, items left in `pending`/`processing` (server died mid-job) are marked `failed: "interrupted by restart"`.
+4. On startup, items left in `pending`/`processing` (server died mid-job) are marked `failed: "Interrupted by server restart"`.
 5. The UI polls `GET /items` every 2 s while any item is `pending` or `processing`.
 
 **Validation split (deliberate):**
@@ -139,7 +139,10 @@ All errors share one shape:
 | Single user, no auth | Auth + per-user scoping of items and retrieval |
 | Fixed-size chunking | Structure-aware chunking, hybrid search (BM25 + vectors), reranking |
 | Changing embedding model orphans old vectors | Re-embedding job keyed on `embedding_model` |
+| Anyone can send unlimited `/ingest` and `/query` calls | Per-user rate limiting (and quotas) on both endpoints |
+| Failed items are terminal; the only recovery is re-ingesting as a new item | Retry endpoint for failed items, plus a dead-letter queue for jobs that exhaust their retries |
+| Provider spend is unbounded (every query and ingest calls Gemini) | Provider budget limits: per-user/day request and token caps, alerts on spend |
 
 ## Out of scope (intentionally)
 
-Auth, delete/edit endpoints, retries, dedup, streaming answers, Docker, frontend tests.
+Auth, delete/edit endpoints, job-level retries (individual Gemini calls are retried), dedup, streaming answers, Docker, frontend tests.

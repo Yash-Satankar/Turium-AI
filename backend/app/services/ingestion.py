@@ -55,17 +55,20 @@ def process_item(item_id: str, deps: IngestionDeps) -> None:
     settings = deps.settings
     start = time.perf_counter()
 
-    with connect(settings.database_path) as conn:
-        if not repo.claim_item(conn, item_id):
-            logger.warning("item not claimable, skipping", extra={"item_id": item_id})
-            return
-        item = repo.get_item(conn, item_id)
-    assert item is not None
-    logger.info("item status", extra={"item_id": item_id, "status": "processing"})
-
     try:
+        with connect(settings.database_path) as conn:
+            if not repo.claim_item(conn, item_id):
+                logger.warning("item not claimable, skipping", extra={"item_id": item_id})
+                return
+            item = repo.get_item(conn, item_id)
+        if item is None:
+            logger.warning("item vanished after claim, skipping", extra={"item_id": item_id})
+            return
+        logger.info("item status", extra={"item_id": item_id, "status": "processing"})
+
         if item.source_type == "url":
-            assert item.url
+            if not item.url:
+                raise IngestError("URL item has no URL to fetch")
             page = fetch_page(
                 item.url,
                 timeout_s=settings.fetch_timeout_s,
@@ -113,8 +116,14 @@ def process_item(item_id: str, deps: IngestionDeps) -> None:
 
 
 def _fail(db_path: str, item_id: str, message: str, start: float) -> None:
-    with connect(db_path) as conn:
-        repo.mark_failed(conn, item_id, message)
+    try:
+        with connect(db_path) as conn:
+            repo.mark_failed(conn, item_id, message)
+    except Exception:
+        # Storage itself is failing; the item stays pending/processing and is
+        # marked failed by restart recovery.
+        logger.exception("could not record item failure", extra={"item_id": item_id, "error": message})
+        return
     logger.info("item status", extra={"item_id": item_id, "status": "failed", "error": message, "duration_ms": _ms(start)})
 
 

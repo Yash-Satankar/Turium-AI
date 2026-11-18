@@ -22,6 +22,7 @@ from app.db import repositories as repo
 from app.db.connection import connect
 from app.services import ingestion
 from app.services.rag import answer_question
+from app.text_utils import truncate
 
 router = APIRouter()
 
@@ -65,7 +66,7 @@ def query(body: QueryRequest, request: Request) -> QueryResponse:
                 source_type=c.source_type,  # type: ignore[arg-type]
                 title=c.title,
                 url=c.url,
-                snippet=c.text if len(c.text) <= limit else c.text[: limit - 1].rstrip() + "…",
+                snippet=truncate(c.text, limit),
                 score=round(c.score, 4),
             )
             for i, c in enumerate(result.sources, start=1)

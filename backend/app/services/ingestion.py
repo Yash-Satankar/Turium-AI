@@ -13,6 +13,7 @@ from app.services.chunker import chunk_text
 from app.services.errors import IngestError
 from app.services.extractor import extract_page
 from app.services.fetcher import Resolver, fetch_page, system_resolver
+from app.text_utils import truncate
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ NOTE_TITLE_MAX = 80
 
 def note_title(content: str) -> str:
     first_line = next((line.strip() for line in content.splitlines() if line.strip()), "")
-    return first_line if len(first_line) <= NOTE_TITLE_MAX else first_line[: NOTE_TITLE_MAX - 1].rstrip() + "…"
+    return truncate(first_line, NOTE_TITLE_MAX)
 
 
 def create_note(db_path: str, content: str) -> repo.ItemRow:

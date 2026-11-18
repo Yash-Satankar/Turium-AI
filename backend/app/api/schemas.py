@@ -5,6 +5,7 @@ from pydantic_core import PydanticCustomError
 
 from app.db.repositories import ItemRow
 from app.services.url_safety import UnsafeUrlError, check_url
+from app.text_utils import truncate
 
 NOTE_MAX_CHARS = 20_000
 PREVIEW_CHARS = 200
@@ -57,10 +58,7 @@ class ItemOut(BaseModel):
 
     @classmethod
     def from_row(cls, row: ItemRow) -> "ItemOut":
-        preview = None
-        if row.raw_content:
-            flat = " ".join(row.raw_content.split())
-            preview = flat if len(flat) <= PREVIEW_CHARS else flat[: PREVIEW_CHARS - 1].rstrip() + "…"
+        preview = truncate(" ".join(row.raw_content.split()), PREVIEW_CHARS) if row.raw_content else None
         return cls(
             id=row.id,
             source_type=row.source_type,  # type: ignore[arg-type]

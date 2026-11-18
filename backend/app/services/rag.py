@@ -6,6 +6,7 @@ from xml.sax.saxutils import escape, quoteattr
 from app.config import Settings
 from app.providers import EmbeddingProvider, LLMProvider
 from app.services.retrieval import RetrievedChunk, retrieve
+from app.text_utils import truncate
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +23,38 @@ Rules:
 
 
 @dataclass(frozen=True)
+class Source:
+    """A cited chunk, numbered as in the prompt, with a display-ready snippet."""
+
+    index: int
+    item_id: str
+    source_type: str
+    title: str | None
+    url: str | None
+    snippet: str
+    score: float
+
+
+@dataclass(frozen=True)
 class Answer:
     answer: str
     found: bool
-    sources: list[RetrievedChunk]
+    sources: list[Source]
+
+
+def _to_sources(chunks: list[RetrievedChunk], snippet_chars: int) -> list[Source]:
+    return [
+        Source(
+            index=i,
+            item_id=c.item_id,
+            source_type=c.source_type,
+            title=c.title,
+            url=c.url,
+            snippet=truncate(c.text, snippet_chars),
+            score=round(c.score, 4),
+        )
+        for i, c in enumerate(chunks, start=1)
+    ]
 
 
 def build_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
@@ -63,4 +92,4 @@ def answer_question(
             "duration_ms": round((time.perf_counter() - start) * 1000),
         },
     )
-    return Answer(answer=text, found=True, sources=chunks)
+    return Answer(answer=text, found=True, sources=_to_sources(chunks, settings.snippet_chars))

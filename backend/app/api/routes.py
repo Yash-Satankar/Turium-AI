@@ -18,11 +18,8 @@ from app.api.schemas import (
     QueryResponse,
     SourceOut,
 )
-from app.db import repositories as repo
-from app.db.connection import connect
-from app.services import ingestion
+from app.services import ingestion, items
 from app.services.rag import answer_question
-from app.text_utils import truncate
 
 router = APIRouter()
 
@@ -48,8 +45,7 @@ def ingest(body: IngestRequest, request: Request, background: BackgroundTasks) -
 
 @router.get("/items", response_model=ItemList)
 def list_items(request: Request, limit: Annotated[int, Query(ge=1, le=200)] = 50) -> ItemList:
-    with connect(request.app.state.settings.database_path) as conn:
-        rows = repo.list_items(conn, limit)
+    rows = items.list_items(request.app.state.settings.database_path, limit)
     return ItemList(items=[ItemOut.from_row(r) for r in rows])
 
 
@@ -57,20 +53,8 @@ def list_items(request: Request, limit: Annotated[int, Query(ge=1, le=200)] = 50
 def query(body: QueryRequest, request: Request) -> QueryResponse:
     state = request.app.state
     result = answer_question(body.question, body.top_k, settings=state.settings, embedder=state.embedder, llm=state.llm)
-    limit = state.settings.snippet_chars
     return QueryResponse(
         answer=result.answer,
         found=result.found,
-        sources=[
-            SourceOut(
-                index=i,
-                item_id=c.item_id,
-                source_type=c.source_type,  # type: ignore[arg-type]
-                title=c.title,
-                url=c.url,
-                snippet=truncate(c.text, limit),
-                score=round(c.score, 4),
-            )
-            for i, c in enumerate(result.sources, start=1)
-        ],
+        sources=[SourceOut.model_validate(s, from_attributes=True) for s in result.sources],
     )

@@ -26,22 +26,20 @@ def note_title(content: str) -> str:
     return truncate(first_line, NOTE_TITLE_MAX)
 
 
-def create_note(db_path: str, content: str) -> repo.ItemRow:
+def create_item(
+    db_path: str, *, source_type: str, title: str | None, url: str | None, raw_content: str | None
+) -> repo.ItemRow:
+    """Inserts a pending item; the caller schedules process_item for it."""
     item_id = str(uuid.uuid4())
     with connect(db_path) as conn:
-        repo.insert_item(conn, item_id=item_id, source_type="note", title=note_title(content), url=None, raw_content=content)
+        repo.insert_item(
+            conn, item_id=item_id, source_type=source_type, title=title, url=url, raw_content=raw_content
+        )
         item = repo.get_item(conn, item_id)
-    logger.info("item created", extra={"item_id": item_id, "source_type": "note", "status": "pending"})
-    return item  # type: ignore[return-value]
-
-
-def create_url(db_path: str, url: str) -> repo.ItemRow:
-    item_id = str(uuid.uuid4())
-    with connect(db_path) as conn:
-        repo.insert_item(conn, item_id=item_id, source_type="url", title=None, url=url, raw_content=None)
-        item = repo.get_item(conn, item_id)
-    logger.info("item created", extra={"item_id": item_id, "source_type": "url", "status": "pending"})
-    return item  # type: ignore[return-value]
+    if item is None:
+        raise RuntimeError(f"item {item_id} missing right after insert")
+    logger.info("item created", extra={"item_id": item_id, "source_type": source_type, "status": "pending"})
+    return item
 
 
 @dataclass

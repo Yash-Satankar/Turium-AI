@@ -37,9 +37,11 @@ def ingest(body: IngestRequest, request: Request, background: BackgroundTasks) -
     state = request.app.state
     db_path = state.settings.database_path
     if isinstance(body, NoteIngest):
-        item = ingestion.create_note(db_path, body.content)
+        item = ingestion.create_item(
+            db_path, source_type="note", title=ingestion.note_title(body.content), url=None, raw_content=body.content
+        )
     else:
-        item = ingestion.create_url(db_path, body.url)
+        item = ingestion.create_item(db_path, source_type="url", title=None, url=body.url, raw_content=None)
     background.add_task(ingestion.process_item, item.id, state.ingestion_deps)
     return ItemOut.from_row(item)
 

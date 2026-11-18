@@ -51,6 +51,7 @@ def _fetch(handler, resolver=public_resolver, **kw):
         timeout_s=kw.get("timeout_s", 10),
         max_bytes=kw.get("max_bytes", 2_000_000),
         max_redirects=kw.get("max_redirects", 5),
+        user_agent="KnowledgeInbox-test/0.1",
         resolver=resolver,
         transport=httpx.MockTransport(handler),
     )

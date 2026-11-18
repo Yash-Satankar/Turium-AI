@@ -12,7 +12,6 @@ from app.services.errors import IngestError
 from app.services.url_safety import UnsafeUrlError, check_url, is_public_ip
 
 HTML_TYPES = {"text/html", "application/xhtml+xml"}
-DEFAULT_USER_AGENT = "KnowledgeInbox/0.1 (python-httpx)"
 
 Resolver = Callable[[str, int], list[str]]
 
@@ -64,9 +63,9 @@ def fetch_page(
     timeout_s: float,
     max_bytes: int,
     max_redirects: int,
+    user_agent: str,
     resolver: Resolver = system_resolver,
     transport: httpx.BaseTransport | None = None,
-    user_agent: str = DEFAULT_USER_AGENT,
 ) -> FetchedPage:
     deadline = time.monotonic() + timeout_s
     current = url

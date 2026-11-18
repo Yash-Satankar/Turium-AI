@@ -1,0 +1,32 @@
+from typing import Protocol
+
+from app.errors import AppError
+
+
+class ProviderError(AppError):
+    status_code = 502
+    code = "PROVIDER_ERROR"
+
+
+class ProviderRateLimited(ProviderError):
+    status_code = 503
+    code = "PROVIDER_RATE_LIMITED"
+
+
+class ProviderTimeout(ProviderError):
+    status_code = 504
+    code = "PROVIDER_TIMEOUT"
+
+
+class EmbeddingProvider(Protocol):
+    # Identifies the vector space. Stored with each chunk; only chunks with the
+    # current model_id are searched, so switching models never mixes spaces.
+    model_id: str
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]: ...
+
+    def embed_query(self, text: str) -> list[float]: ...
+
+
+class LLMProvider(Protocol):
+    def generate(self, system: str, prompt: str) -> str: ...
